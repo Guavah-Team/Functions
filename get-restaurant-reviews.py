@@ -1,39 +1,46 @@
-#DEPRECATED. Must be updated for new review logic. 
-
 import json
 import boto3
+from boto3.dynamodb.conditions import Key, Attr
+from botocore.exceptions import ClientError
+
+dynamodb = boto3.resource('dynamodb')
+
+def get_users(users_id_list):
+    guavah_users = dynamodb.Table('GuavahUsers')
+    
+    batch_keys = {
+        guavah_users.name:{
+            'Keys': [{'UserID': user_id} for user_id in users_id_list]
+        }
+    }
+    
+    users = dynamodb.batch_get_item(RequestItems=batch_keys)["Responses"]["GuavahUsers"]
+    users_dictionary = {}
+    for user in users:
+        users_dictionary[user["UserID"]] = [user["Name"], user["ProfilePhoto"]]
+    return users_dictionary
+    
 
 def get_restaurant_reviews(fsqid):
-    dynamodb = boto3.resource('dynamodb')
-
-    guavah_restaurants = dynamodb.Table('GuavahRestaurants')
-    restaurant = guavah_restaurants.get_item(
-        Key={
-            'FSQID': fsqid,
-        }
+    reviews = dynamodb.Table('Reviews')
+    restaurant_reviews = reviews.query(
+        KeyConditionExpression = Key('FSQID').eq(fsqid)
     )
     
-    #Check if restaurant exists
-    if ("Item" in restaurant):
-        restaurant = restaurant["Item"]
-        #Check if restaurant has any reviews
-        if ("Reviews" in restaurant):
-            restaurant_reviews = restaurant["Reviews"]
-            return restaurant_reviews
-        else:
-            return None
-    else: 
-        return None
+    restaurant_reviews = restaurant_reviews["Items"]
+    users_id_list = []
+    for review in restaurant_reviews:
+        users_id_list.append(review["UserID"])
+    
+    users = get_users(users_id_list)
+    for review in restaurant_reviews:
+        review["Name"] = users[review["UserID"]][0]
+        review["ProfilePhoto"] = users[review["UserID"]][1]
+    
+    return restaurant_reviews
 
 def lambda_handler(event, context):
     fsqid = event['FSQID']
     restaurant_reviews = get_restaurant_reviews(fsqid)
-    if (restaurant_reviews is not None):
-        return {
-            'statusCode': 200,
-            'body': restaurant_reviews
-        }
-    else:
-        return {
-            'statusCode': 404
-        }
+    return restaurant_reviews
+
