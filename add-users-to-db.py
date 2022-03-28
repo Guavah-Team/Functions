@@ -13,7 +13,10 @@ def put_user(user_ID, name, email, dt):
             'Name': name,
             'Email': email,
             'CreatedAt': dt,
-            'Reviews': []
+            'VersusViews': {},
+            'VersusQueue': [],
+            'VersusPairs': [],
+            'DailyVotes': 0
         }
     )
     return response
