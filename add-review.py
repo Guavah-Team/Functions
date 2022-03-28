@@ -66,7 +66,7 @@ def put_review(fsqid, user_id, rating, comment):
             restaurant_combinations = (restaurant_combinations | versus_pairs) - (restaurant_combinations & versus_pairs)
             
             for x in range(5):
-                if (10 - len(user['VersusQueue'])) > 1 and len(restaurant_combinations) >= 1:
+                if (5 - len(user['VersusQueue'])) > 1 and len(restaurant_combinations) >= 1:
                     new_pair = list(restaurant_combinations.pop())
                     if valid_pair(new_pair, user):
                         user['VersusQueue'].append(new_pair)
