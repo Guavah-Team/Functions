@@ -1,3 +1,5 @@
+#DEPRECATED. Must be updated for new review logic. 
+
 import json
 import boto3
 
