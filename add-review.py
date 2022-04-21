@@ -3,6 +3,75 @@ import boto3
 from itertools import combinations
 from botocore.exceptions import ClientError
 
+client = boto3.resource('dynamodb')
+users_table = client.Table('GuavahUsers')
+
+def increase_user_level(user_id, user_level, user_exp, added_xp):
+    
+    exp_map = {
+        0: 15,
+        1: 60,
+        2: 63,
+        3: 68,
+        4: 75,
+        5: 84,
+        6: 95,
+        7: 108,
+        8: 123,
+        9: 140,
+        10: 159,
+        11: 180,
+        12: 203,
+        13: 228,
+        14: 255,
+        15: 284,
+        16: 315,
+        17: 348,
+        18: 383,
+        19: 420,
+        20: 459,
+        21: 500,
+        22: 543,
+        23: 588,
+        24: 635,
+        25: 999
+    }
+    
+    required_exp = exp_map[user_level]
+    if (user_exp + added_xp) >= required_exp:
+        if user_level < 25: 
+            user_level = user_level + 1
+            user_exp = (user_exp+added_xp) - required_exp
+        else:
+            user_exp = user_exp+added_xp
+    else:
+        user_exp = user_exp+added_xp
+   
+    try:    
+        #Update The User
+        updated_user = users_table.update_item(
+           Key={
+            'UserID': user_id
+        },
+        UpdateExpression="SET #Lvl = :level, XP = :xp",
+        ExpressionAttributeValues={
+            ':level': user_level,
+            ':xp': user_exp
+        },
+        ExpressionAttributeNames={
+            "#Lvl": "Level"
+        },
+        ReturnValues="UPDATED_NEW"
+        )
+    except ClientError as e:
+        statusCode = 500
+        errorMessage = "Oops!\n Unable to add your review at this time."
+        return {
+            'statusCode': statusCode,
+            'errorMessage': errorMessage
+        }
+
+
 #Checks if both restaurants in the given pair have not exceeded the maximum number of views of 10
 def valid_pair(new_pair, user):
     count = 0
@@ -58,6 +127,8 @@ def put_review(fsqid, user_id, rating, comment):
             }
             
         user = user["Item"]
+        user_level = user["Level"]
+        user_xp = user["XP"]
         user["VersusViews"][fsqid] = 0
         
         if user["DailyVotes"] < 10 and len(user["VersusQueue"]) < 5 and len(user["VersusViews"]) > 1:
@@ -72,6 +143,7 @@ def put_review(fsqid, user_id, rating, comment):
                         user['VersusQueue'].append(new_pair)
                 else:
                     break
+        increase_user_level(user_id, user_level, user_xp, 5)
         try:            
             response2 = guavah_users.update_item(
                Key={
@@ -84,6 +156,8 @@ def put_review(fsqid, user_id, rating, comment):
             },
             ReturnValues="UPDATED_NEW"
             )
+            
+            
         except ClientError as e:
             statusCode = 500
             errorMessage = "Oops!\n Unable to add your review at this time."
