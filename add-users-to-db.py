@@ -3,6 +3,7 @@ import boto3
 import random
 from random import randrange
 from time import gmtime, strftime
+from botocore.exceptions import ClientError
 
 #Shuffle the name into random letters and numbers
 def shuffle_name(name):
@@ -67,7 +68,7 @@ def generateProfilePhoto(username):
     mouth = shuffle_mouth()
     rotate = shuffle_rotate()
 
-    url = f"https://avatars.dicebear.com/api/adventurer-neutral/:{name}.svg?backgroundColor=%23{color}&flip={flip}&accessoiresProbability=40&mouth={mouth}&rotate={rotate}"
+    url = f"https://avatars.dicebear.com/api/adventurer-neutral/:{name}.svg?backgroundColor=%23{color}&flip={flip}&accessoiresProbability=40&mouth={mouth}&rotate={rotate}&radius=50"
     #webbrowser.open(url, new=2)
     return url
 
@@ -83,10 +84,16 @@ def put_user(user_ID, name, email, dt):
             'Name': name,
             'Email': email,
             'CreatedAt': dt,
+            'Level': 0,
+            'XP': 0,
+            'DarkTheme': 0,
+            'Vegan': 0,
+            'Radius': 8046,
             'VersusViews': {},
             'VersusQueue': [],
             'VersusPairs': [],
             'DailyVotes': 0,
+            'Badges': [],
             'ProfilePhoto': generateProfilePhoto(name)
         }
     )
