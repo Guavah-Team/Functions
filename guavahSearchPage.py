@@ -2,15 +2,27 @@ import json
 import requests
 import boto3
 import math
-from botocore.exceptions import ClientError
+import botocore
+from boto3.dynamodb.conditions import Attr
 from boto3.dynamodb.conditions import Key
+
+###
+# Picks the rank icon based on their current gor value
+###
+def pick_rank_icons(restaurants):
+    rungs = [0, 91, 181, 271, 361, 451, 541, 631, 721, 811, 901, 1000]
+    
+    
+    for restaurant in restaurants:
+        for i in range(len(rungs)):
+            if restaurant["gor"] < rungs[i]:
+                restaurant["badge"] = f"https://guavah-image-bucket.s3.us-west-1.amazonaws.com/ranks/gor_{rungs[i-1]}.png"
+                break
 
 ###
 # get_gor returns the gor of the passed poi.
 # used as the key to sort search results before returning them.
 ###
-
-
 def get_gor(poi):
     return poi["gor"]
 
@@ -19,41 +31,40 @@ def get_gor(poi):
 # This write will not update items and will only add them to DynamoDB
 # if the key does not exist.
 ###
-
-
 def put_restaurants(results, gor=150):
     client = boto3.resource('dynamodb')
     table = client.Table('GuavahRestaurants')
-
-    with table.batch_writer() as batch:
-        for poi in results:
-            batch.put_item(
+    
+    for poi in results:        
+        try:
+            table.put_item(
                 Item={
                     'FSQID': poi["id"],
-                    'GOR': gor
-                }
+                    'GOR': poi["gor"],
+                },
+                ConditionExpression='attribute_not_exists(FSQID)'
             )
+        except botocore.exceptions.ClientError as e:
+            pass
 ###
 # get restaurants takes in a list and performs a batch read.
-# Should only be preformed after a batch write to ensure that
+# Should only be preformed after a batch write to ensure that 
 # all items in list are returned.
-###
-
-
+###                
 def get_restaurants(results):
     client = boto3.resource('dynamodb')
     table = client.Table('GuavahRestaurants')
-
+    
     results_keys = []
     for poi in results:
         results_keys.append(poi["id"])
-
+    
     batch_keys = {
-        table.name: {
+        table.name:{
             'Keys': [{'FSQID': id} for id in results_keys]
         }
     }
-
+    
     response = client.batch_get_item(RequestItems=batch_keys)
     response_dictionary = {}
     for poi in response['Responses']['GuavahRestaurants']:
@@ -69,19 +80,15 @@ def get_restaurants(results):
 # These calculated values are then passed into calc_geocoding to slice this grid in half
 # and return 100 results as opposed to 50 (limitations caused by the API we are using).
 ###
-
-
-def get_ne_sw(latlong, radius):
+def get_ne_sw(latlong,radius):
     latlong = latlong.split(",")
     user_lat, user_long = latlong[0], latlong[1]
     radius_km = float(float(radius)/1000)
-
-    ne = str(float(user_lat) + (radius_km / 6378) * (180/math.pi)) + \
-        ","+str(float(user_long) + (radius_km / 6378) * (180/math.pi))
-    sw = str(float(user_lat) - (radius_km / 6378) * (180/math.pi)) + \
-        ","+str(float(user_long) - (radius_km / 6378) * (180/math.pi))
+    
+    ne = str(float(user_lat) + (radius_km / 6378) * (180/math.pi))+","+str(float(user_long) + (radius_km / 6378) * (180/math.pi))
+    sw = str(float(user_lat) - (radius_km / 6378) * (180/math.pi))+","+str(float(user_long) - (radius_km / 6378) * (180/math.pi))
     return [ne, sw]
-
+    
 ###
 # calc_geocoding takes in the ne and sw geocode cordinates
 # (recieved from geoapify and altered) to fit the foursquare syntax.
@@ -96,15 +103,13 @@ def get_ne_sw(latlong, radius):
 # +---+      +---+
 # (50x)      (100x)
 ###
-
-
 def calc_geocoding(ne, sw):
     ne_lat = ne.split(",")[0]
     ne_long = ne.split(",")[1]
     sw_lat = sw.split(",")[0]
     sw_long = sw.split(",")[1]
-
-    # Calculating the mid right corner
+    
+    #Calculating the mid right corner
     midpoint_1 = (str((float(ne_lat)+float(sw_lat))/2.0))+","+str(sw_long)
     midpoint_2 = (str((float(ne_lat)+float(sw_lat))/2.0))+","+str(ne_long)
     return [midpoint_1, midpoint_2]
@@ -113,30 +118,42 @@ def calc_geocoding(ne, sw):
 # Takes in returned results from FSQ api, adds them to a list,
 # and then returns it.
 ###
-
-
 def add_results(response):
     # Results from fsq that will be modified and then returned.
     fsq_results = []
+    photo_placeholder = "https://guavah-image-bucket.s3.us-west-1.amazonaws.com/placeholders/placeholder_deli.jpg"
     for poi in response["results"]:
         categories = []
         for category in poi["categories"]:
             categories.append(category["id"])
+        
+        photo_gallary = []
+        if len(poi["photos"]) > 0:
+            total_photos = 0
+            for photo in poi["photos"]:
+                if total_photos < 10:
+                    photo_gallary.append({"photo": photo["prefix"] + "original" + photo["suffix"]})
+            
+                    
         dict = {
             # FSQ id used to bind a restaurant with a gor value.
             "id": poi["fsq_id"],
             "name": poi["name"],
             # Our gor value (defaults to zero-- entire list is updated after.)
-            "gor": 0,
+            "gor": 200,
             "tel": poi["tel"] if ("tel" in poi) else None,
             "website": poi["website"] if ("website" in poi) else None,
             "price": poi["price"] if poi["price"] < 4 else 3,
             "location": poi["location"]["formatted_address"],
             "distance": poi["distance"],
             "categories": categories,
-            "photo": poi["photos"][0]["prefix"] + "original" + poi["photos"][0]["suffix"] if ("photos" in poi and len(poi["photos"]) > 0) else None,
+            "photo": poi["photos"][0]["prefix"] + "original" + poi["photos"][0]["suffix"] if ("photos" in poi and len(poi["photos"]) > 0) else photo_placeholder,
+            "photo_gallary": photo_gallary,
+            "badge": "https://guavah-image-bucket.s3.us-west-1.amazonaws.com/ranks/gor_0.png",
             "venue": "http://foursquare.com/v/" + poi["fsq_id"]
         }
+        if "rating" in poi:
+            dict["gor"] = int((poi["rating"]/10) * 370)
         fsq_results.append(dict)
     return fsq_results
 
@@ -148,24 +165,21 @@ def add_results(response):
 #
 # If data is not found by FSQ we set that field to None.
 ###
-
-
 def lambda_handler(event, context):
     status_code = 200
-    # Results from fsq that will be modified and then returned.
-    fsq_results = []
-
-    radius = event['radius']  # 2000
-    latlong = event['latlong']  # 41.8781%2C-87.6298
-    term = event['term']  # Olive%20Garden
-    is_open = event['isOpen']  # true
-    category = event['category']  # 13000
-    min_price = event['minPrice']  # 1
-    max_price = event['maxPrice']  # 2
-    do_chains = event['doChains']  # true
-    fields = "fsq_id,name,description,tel,website,distance,price,categories,popularity,location,photos"
-    limit = event['limit']  # 1
-
+    fsq_results = [] #Results from fsq that will be modified and then returned.
+    
+    radius = event['radius'] #2000
+    latlong = event['latlong'] #41.8781%2C-87.6298
+    term = event['term'] #Olive%20Garden
+    is_open = event['isOpen'] #true
+    category = event['category'] #13000
+    min_price = event['minPrice'] #1
+    max_price = event['maxPrice'] #2
+    do_chains = event['doChains'] #true
+    fields = "fsq_id,name,description,tel,website,distance,price,categories,popularity,location,photos,rating"
+    limit = event['limit'] #1
+    
     # If it is a small search radius less than 10 miles
     if(float(radius) < 16254.37):
         url = f"https://api.foursquare.com/v3/places/search?query={term}&ll={latlong}&radius={radius}&categories={category}&exclude_all_chains={do_chains}&fields={fields}&min_price={min_price}&max_price={max_price}&open_now={is_open}&limit={limit}"
@@ -174,18 +188,19 @@ def lambda_handler(event, context):
             "Accept": "application/json",
             "Authorization": "fsq331oOD5fSvDUla7PwS5kJ8Ttw2V07DMrldp8XJxCU8mg="
         }
-
+    
         response = requests.request("GET", url, headers=headers)
         response = response.json()
-
+        print(response)
+        
         fsq_results = (add_results(response))
-
+    
     # If it is a large search radius > than 10 miles
     else:
-        corners = get_ne_sw(latlong, radius)
+        corners =  get_ne_sw(latlong, radius)
         midpoints = calc_geocoding(corners[0], corners[1])
-
-        # First Sector
+        
+        #First Sector
         url = f"https://api.foursquare.com/v3/places/search?query={term}&categories={category}&exclude_all_chains={do_chains}&fields={fields}&min_price={min_price}&max_price={max_price}&open_now={is_open}&sort=POPULARITY&ne={corners[0]}&sw={midpoints[0]}&limit=50"
         headers = {
             "Accept": "application/json",
@@ -194,8 +209,8 @@ def lambda_handler(event, context):
         response = requests.request("GET", url, headers=headers)
         response = response.json()
         fsq_results = (add_results(response))
-
-        # Second Sector
+        
+        #Second Sector
         url = f"https://api.foursquare.com/v3/places/search?query={term}&categories={category}&exclude_all_chains={do_chains}&fields={fields}&min_price={min_price}&max_price={max_price}&open_now={is_open}&sort=POPULARITY&ne={midpoints[1]}&sw={corners[1]}&limit=50"
         headers = {
             "Accept": "application/json",
@@ -204,18 +219,19 @@ def lambda_handler(event, context):
         response = requests.request("GET", url, headers=headers)
         response = response.json()
         fsq_results.extend(add_results(response))
-
+    
     if(len(fsq_results) > 0):
         put_restaurants(fsq_results)
         gor_results = get_restaurants(fsq_results)
-
+        
         for poi in fsq_results:
             poi["gor"] = gor_results[poi["id"]]
-
-        fsq_results.sort(reverse=True, key=get_gor)
-
+            
+        fsq_results.sort(reverse=True,key=get_gor)
+        pick_rank_icons(fsq_results)
+    
         if(len(fsq_results) > 50):
-            fsq_results = fsq_results[:50]
+           fsq_results = fsq_results[:50]
     else:
         status_code = 503
 
