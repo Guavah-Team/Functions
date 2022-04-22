@@ -8,7 +8,15 @@ client = boto3.resource('dynamodb')
 users_table = client.Table('GuavahUsers')
 restaurants_table = client.Table('GuavahRestaurants')
 
-def update_user(user_id, user_level, user_exp, versus_queue, daily_votes, added_xp):
+def pick_rank_icon(gor):
+    rungs = [0, 91, 181, 271, 361, 451, 541, 631, 721, 811, 901, 1000]
+    
+    for i in range(len(rungs)):
+        if gor < rungs[i]:
+            return f"https://guavah-image-bucket.s3.us-west-1.amazonaws.com/ranks/gor_{rungs[i-1]}.png"
+            break
+
+def update_user(user_id, user_level, user_exp, versus_queue, daily_votes, pair, added_xp):
     statusCode = 200
     errorMessage = "Versus Success"
     
@@ -50,7 +58,7 @@ def update_user(user_id, user_level, user_exp, versus_queue, daily_votes, added_
             user_exp = user_exp + added_xp
     else:
         user_exp = user_exp + added_xp
-   
+    
     del versus_queue[0]
     daily_votes += 1
     try:    
@@ -59,12 +67,13 @@ def update_user(user_id, user_level, user_exp, versus_queue, daily_votes, added_
            Key={
             'UserID': user_id
         },
-        UpdateExpression="SET #Lvl = :level, XP = :xp, VersusQueue = :vq, DailyVotes = :dv",
+        UpdateExpression="SET #Lvl = :level, XP = :xp, VersusQueue = :vq, DailyVotes = :dv, VersusPairs = list_append(VersusPairs, :vp)",
         ExpressionAttributeValues={
             ':level': user_level,
             ':xp': user_exp,
             ':vq': versus_queue,
-            ':dv': daily_votes
+            ':dv': daily_votes,
+            ':vp': [pair]
         },
         ExpressionAttributeNames={
             "#Lvl": "Level"
@@ -72,6 +81,7 @@ def update_user(user_id, user_level, user_exp, versus_queue, daily_votes, added_
         ReturnValues="UPDATED_NEW"
         )
     except ClientError as e:
+        print(e)
         statusCode = 500
         errorMessage = "Oops!\n Versus Error"
         return {
@@ -153,7 +163,6 @@ def calc_user_weight(user_level):
     return 1 + (user_level/25)
 
 def lambda_handler(event, context):
-    
     r1 = {
         "rating": event["restaurants"][0]["gor"],
         "lat": event["restaurants"][0]["location"]["latitude"],
@@ -175,13 +184,32 @@ def lambda_handler(event, context):
         "selection": event["userSelection"]
     }
     
-    update_user(event["user"]["UserID"], event["user"]["Level"], event["user"]["XP"], event["user"]["VersusQueue"], event["user"]["DailyVotes"], 5)
+    r1_id = event["restaurants"][0]["id"]
+    r2_id = event["restaurants"][1]["id"]
+    pair = [r1_id, r2_id]
+
+    update_user(event["user"]["UserID"], event["user"]["Level"], event["user"]["XP"], event["user"]["VersusQueue"], event["user"]["DailyVotes"], pair, 5)
     new_scores = update_gor(r1,r2,user)
     r1["rating"] = new_scores[0]
     r2["rating"] = new_scores[1]
-    update_restaurant(event["restaurants"][0]["id"], new_scores[0])
-    update_restaurant(event["restaurants"][1]["id"], new_scores[1])
+    update_restaurant(r1_id, new_scores[0])
+    update_restaurant(r2_id, new_scores[1])
     
     return {
-        
+        "restaurants": [
+            {
+                "id": event["restaurants"][0]["id"],
+                "oldGor": event["restaurants"][0]["gor"],
+                "gor": new_scores[0],
+                "changedGor": new_scores[0] - event["restaurants"][0]["gor"],
+                "badge": pick_rank_icon(new_scores[0])
+            },
+            {
+                "id": event["restaurants"][1]["id"],
+                "old_gor": event["restaurants"][1]["gor"],
+                "gor": new_scores[1],
+                "changedGor": new_scores[1] - event["restaurants"][0]["gor"],
+                "badge": pick_rank_icon(new_scores[1])
+            }
+            ]
     }
