@@ -8,16 +8,19 @@ users_table = client.Table('GuavahUsers')
 def lambda_handler(event, context):
     statusCode = 200
     radius = 1609 * event['Radius']
+    dark = event['DarkMode']
+    vegan = event['Vegan']
+    
     try:    
         #Update The User
         updated_user = users_table.update_item(
            Key={
             'UserID': event['UserID']
         },
-        UpdateExpression="SET DarkMode = :dark_mode, Vegan = :vegan, Radius = :radius",
+        UpdateExpression="SET DarkTheme = :dark_mode, Vegan = :vegan, Radius = :radius",
         ExpressionAttributeValues={
-            ':dark_mode': event['DarkMode'],
-            ':vegan': event['Vegan'],
+            ':dark_mode': dark,
+            ':vegan': vegan,
             ':radius': radius
         },
         ReturnValues="UPDATED_NEW"
